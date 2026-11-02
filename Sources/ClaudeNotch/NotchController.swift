@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Borderless, non-activating panel parked over the notch, just above the menu bar.
@@ -41,6 +42,10 @@ final class NotchController {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
     private var pulse: Timer?
     private var hoverChange: DispatchWorkItem?
+    private let usageModel = UsageModel()
+    private lazy var usageStore = UsageStore(model: usageModel)
+    private lazy var usageStatusItem = UsageStatusItem(model: usageModel)
+    private var usageSettingsWatch: AnyCancellable?
     private var pauseReasons: Set<String> = []
     private let debug = ProcessInfo.processInfo.environment["CLAUDE_NOTCH_DEBUG"] != nil
 
@@ -81,6 +86,7 @@ final class NotchController {
             }
         }
 
+        if !demo { startUsage() }
         trackMouse()
         observeSystem()
         if Self.screenIsLocked { setPaused("lock", true) }  // launched behind the lock screen
@@ -145,7 +151,28 @@ final class NotchController {
     }
 
     func stop() {
+        usageStore.stop()
         try? FileManager.default.removeItem(at: Self.aliveFile)
+    }
+
+    // MARK: Usage
+
+    private func startUsage() {
+        model.usage = usageModel
+        usageSettingsWatch = usageModel.$settings.sink { [weak self] settings in
+            self?.placeUsage(showBar: settings.showBar)  // willSet: read the new value from the sink, not the model
+        }
+        usageStore.start()
+    }
+
+    /// A notched display gets the bar under the notch; any other display gets a menu bar item.
+    private func placeUsage(showBar: Bool) {
+        guard model.usage != nil else { return }
+        // CLAUDE_NOTCH_USAGE_MENUBAR=1 forces the menu bar fallback on a notched Mac, for testing it.
+        let hardware = model.metrics.isHardware && ProcessInfo.processInfo.environment["CLAUDE_NOTCH_USAGE_MENUBAR"] == nil
+        model.stripVisible = showBar && hardware
+        if !model.stripVisible { model.closeUsage() }
+        usageStatusItem.setVisible(showBar && !hardware)
     }
 
     // MARK: State
@@ -188,10 +215,11 @@ final class NotchController {
     private func layout() {
         let metrics = NotchMetrics.detect()
         model.metrics = metrics
-        let size = CGSize(width: 600, height: metrics.height + 260)
+        let size = CGSize(width: 600, height: metrics.height + NotchModel.usageBodyHeight + 70)
         let target = NSRect(x: (metrics.centerX - size.width / 2).rounded(), y: metrics.top - size.height,
                             width: size.width, height: size.height)
         panel.setFrame(target, display: true)
+        placeUsage(showBar: usageModel.settings.showBar)
         log("layout target: \(target) got: \(panel.frame) notch: \(metrics)")
     }
 
@@ -207,6 +235,15 @@ final class NotchController {
             MainActor.assumeIsolated { self?.refreshHitTesting() }
         }) {
             monitors.append(global)
+        }
+        // A click anywhere else puts the usage panel away.
+        if let click = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.model.usageOpen, !self.pillFrame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { return }
+                self.model.closeUsage()
+            }
+        }) {
+            monitors.append(click)
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged], handler: { [weak self] event in
             MainActor.assumeIsolated { self?.refreshHitTesting() }

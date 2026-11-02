@@ -105,6 +105,8 @@ enum Snapshotter {
             ("6-overview", trio, nil, true, MascotFrame(eyes: .right)),
             ("7-overview-empty", [], nil, true, MascotFrame(eyes: .closed, squash: 0.1)),
         ]
+        renderUsage(to: dir)
+
         for (name, sessions, kind, hovering, frame) in states {
             let model = NotchModel(metrics: metrics)
             model.sessions = sessions
@@ -114,6 +116,47 @@ enum Snapshotter {
             write(Backdrop(height: metrics.height) { NotchView(model: model, engine: engine) },
                   size: canvas, to: dir.appendingPathComponent("\(name).png"), scale: 2)
         }
+    }
+
+    /// The usage bar and panel in every state, from a fixed fixture (no real transcripts).
+    static func renderUsage(to dir: URL) {
+        RenderMode.snapshot = true
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let metrics = NotchMetrics.detect()
+        let canvas = CGSize(width: 600, height: metrics.height + NotchModel.usageBodyHeight + 40)
+        let barCanvas = CGSize(width: 600, height: metrics.height + 120)
+        let session = Session.sample("a", "trackside", .working, "Editing overlay.ts", ran: 187)
+        let done = Session.sample("b", "claude-notch", .done, "Built the notch app with 0 warnings.", ran: 412)
+
+        func stage(_ name: String, fraction: Double?, size: CGSize, kind: SessionEvent.Kind? = nil, sessions: [Session] = [],
+                   hovering: Bool = false, open: Bool = false, settings: Bool = false, active: Bool = true) {
+            let usage = UsageModel(settings: UsageSettings(), snapshot: UsageFixture.snapshot(fraction: fraction, active: active))
+            usage.showingSettings = settings
+            let model = NotchModel(metrics: metrics)
+            model.usage = usage
+            model.stripVisible = true
+            model.sessions = sessions
+            model.stage(kind, session: sessions.first, hovering: hovering, usageOpen: open)
+            let engine = MascotEngine()
+            engine.pose(sessions.isEmpty ? MascotFrame(eyes: .closed, squash: 0.1) : MascotFrame(legs: .stepA, tick: 6))
+            write(Backdrop(height: metrics.height) { NotchView(model: model, engine: engine) },
+                  size: size, to: dir.appendingPathComponent("\(name).png"), scale: 2)
+        }
+
+        stage("usage-1-bar-calm", fraction: 0.62, size: barCanvas)
+        stage("usage-2-bar-amber", fraction: 0.82, size: barCanvas)
+        stage("usage-3-bar-red", fraction: 0.94, size: barCanvas)
+        stage("usage-4-bar-idle", fraction: nil, size: barCanvas, active: false)
+        stage("usage-5-bar-working", fraction: 0.62, size: barCanvas, sessions: [session])
+        stage("usage-6-bar-in-overview", fraction: 0.62, size: canvas, sessions: [session, done], hovering: true)
+        stage("usage-7-panel", fraction: 0.62, size: canvas, sessions: [session], open: true)
+        stage("usage-8-panel-red", fraction: 0.94, size: canvas, sessions: [session], open: true)
+        stage("usage-9-settings", fraction: 0.62, size: canvas, sessions: [session], open: true, settings: true)
+
+        let popover = UsageModel(settings: UsageSettings(), snapshot: UsageFixture.snapshot(fraction: 0.62, active: true))
+        write(ZStack { Color(white: 0.12); UsagePanelView(usage: popover, metrics: nil) },
+              size: CGSize(width: NotchModel.usageWidth, height: NotchModel.usageBodyHeight + 14),
+              to: dir.appendingPathComponent("usage-10-menubar-popover.png"), scale: 2)
     }
 
     static func renderIconset(to dir: URL) {
@@ -140,6 +183,41 @@ enum Snapshotter {
             return
         }
         try? png.write(to: url)
+    }
+}
+
+/// A believable usage snapshot for renders: the block sits at `fraction` of the default 5-hour limit.
+enum UsageFixture {
+    static func snapshot(fraction: Double?, active: Bool) -> UsageSnapshot {
+        let now = Date()
+        let config = UsageConfig()
+        let calendar = Calendar.current
+        let weekStart = UsageAggregator.weekStart(containing: now, calendar: calendar, startDay: config.weekStartDay)
+        var snap = UsageSnapshot(now: now, config: config, weekStart: weekStart,
+                                 weekEnd: calendar.date(byAdding: .day, value: 7, to: weekStart) ?? now)
+        func tokens(counted: Int) -> TokenCounts {
+            TokenCounts(input: counted / 2000, output: counted / 5, cacheWrite: counted - counted / 2000 - counted / 5, cacheRead: counted * 38)
+        }
+        if let fraction {
+            let counted = Int(fraction * Double(config.fiveHourLimit))
+            var block = UsageBlock(start: now.addingTimeInterval(-(2 * 3600 + 46 * 60)), end: now.addingTimeInterval(2 * 3600 + 14 * 60),
+                                   lastActivity: now.addingTimeInterval(-40))
+            block.totals = UsageTotals(tokens: tokens(counted: counted), messages: 212)
+            snap.block = block
+        }
+        snap.today = UsageTotals(tokens: tokens(counted: 4_210_000), messages: 351)
+        snap.week = UsageTotals(tokens: tokens(counted: 9_640_000), messages: 902)
+        snap.last7Days = snap.week
+        snap.projects = [UsageBreakdown(name: "claude-notch", tokens: tokens(counted: 4_300_000), counted: 4_300_000, messages: 410),
+                         UsageBreakdown(name: "trackside", tokens: tokens(counted: 3_100_000), counted: 3_100_000, messages: 300),
+                         UsageBreakdown(name: "infinite-edition", tokens: tokens(counted: 1_500_000), counted: 1_500_000, messages: 140),
+                         UsageBreakdown(name: "~", tokens: tokens(counted: 740_000), counted: 740_000, messages: 52)]
+        snap.models = [UsageBreakdown(name: "opus 5.5", tokens: tokens(counted: 6_900_000), counted: 6_900_000, messages: 580),
+                       UsageBreakdown(name: "sonnet 5.5", tokens: tokens(counted: 2_700_000), counted: 2_700_000, messages: 310),
+                       UsageBreakdown(name: "haiku 4.5", tokens: tokens(counted: 40_000), counted: 40_000, messages: 12)]
+        snap.activeNow = active && fraction != nil
+        snap.lastActivity = now.addingTimeInterval(-40)
+        return snap
     }
 }
 

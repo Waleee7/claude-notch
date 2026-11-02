@@ -30,7 +30,7 @@ struct NotchMetrics: Equatable {
 
 @MainActor
 final class NotchModel: ObservableObject {
-    enum Mode: Equatable { case collapsed, banner, overview }
+    enum Mode: Equatable { case collapsed, banner, overview, usage }
 
     struct Banner: Equatable {
         let id = UUID()
@@ -42,6 +42,10 @@ final class NotchModel: ObservableObject {
     @Published var sessions: [Session] = []
     @Published private(set) var banner: Banner?
     @Published private(set) var hovering = false
+    @Published private(set) var usageOpen = false
+    /// Whether the usage bar hangs under the notch (a notched display with the bar switched on).
+    @Published var stripVisible = false
+    var usage: UsageModel?
     @Published var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     @Published var muted = UserDefaults.standard.bool(forKey: "mutePopdowns") {
         didSet { UserDefaults.standard.set(muted, forKey: "mutePopdowns") }
@@ -52,9 +56,14 @@ final class NotchModel: ObservableObject {
     /// the 24pt corners; text starts after the 36pt mascot plus a 12pt gap.
     static let gutter: CGFloat = 13 + 16
     static let textStart: CGFloat = gutter + 36 + 12
+    /// The usage bar: a hairline track and one label, attached under whatever shape is showing.
+    static let stripHeight: CGFloat = 20
+    static let usageWidth: CGFloat = 460
+    static let usageBodyHeight: CGFloat = 372
     var onOpen: ((Session?) -> Void)?
 
     private var dismissal: DispatchWorkItem?
+    private var usageClose: DispatchWorkItem?
 
     init(metrics: NotchMetrics) {
         self.metrics = metrics
@@ -62,8 +71,11 @@ final class NotchModel: ObservableObject {
 
     var mode: Mode {
         if banner != nil { return .banner }
+        if usageOpen && stripVisible { return .usage }
         return hovering ? .overview : .collapsed
     }
+
+    private var strip: CGFloat { stripVisible ? Self.stripHeight : 0 }
 
     // MARK: Geometry
 
@@ -72,12 +84,14 @@ final class NotchModel: ObservableObject {
     func size(for mode: Mode) -> CGSize {
         switch mode {
         case .collapsed:
-            return CGSize(width: metrics.width + earWidth * 2, height: metrics.height)
+            return CGSize(width: metrics.width + earWidth * 2, height: metrics.height + strip)
         case .banner:
-            return CGSize(width: openWidth, height: metrics.height + 66)
+            return CGSize(width: openWidth, height: metrics.height + 66 + strip)
         case .overview:
             let rows = CGFloat(min(sessions.count, 4))
-            return CGSize(width: openWidth, height: metrics.height + (rows > 0 ? 52 + 9 + rows * 40 + 10 : 56))
+            return CGSize(width: openWidth, height: metrics.height + (rows > 0 ? 52 + 9 + rows * 40 + 10 : 56) + strip)
+        case .usage:
+            return CGSize(width: max(openWidth, Self.usageWidth), height: metrics.height + Self.usageBodyHeight)
         }
     }
 
@@ -87,7 +101,7 @@ final class NotchModel: ObservableObject {
         // Legs 6pt off the bottom edge centers the body on the menu bar, level with the ear glyph.
         case .collapsed: return CGPoint(x: 6 + (earWidth - 6) / 2, y: metrics.height - 6)
         case .banner: return CGPoint(x: Self.gutter + 18, y: metrics.height + 47)
-        case .overview: return CGPoint(x: Self.gutter + 18, y: metrics.height + 40)
+        case .overview, .usage: return CGPoint(x: Self.gutter + 18, y: metrics.height + 40)
         }
     }
 
@@ -121,6 +135,41 @@ final class NotchModel: ObservableObject {
         guard hovering != value else { return }
         hovering = value
         if !value, banner != nil { scheduleDismiss(after: 1.4) }
+        usageClose?.cancel()
+        if !value, usageOpen { scheduleUsageClose() }
+    }
+
+    // MARK: Usage panel
+
+    /// Click the usage bar to open the panel, click again to close it.
+    func toggleUsage() {
+        if usageOpen && mode == .usage { closeUsage() } else { openUsage() }
+    }
+
+    func openUsage() {
+        guard stripVisible else { return }
+        dismissal?.cancel()
+        usageClose?.cancel()
+        banner = nil
+        usageOpen = true
+    }
+
+    func closeUsage() {
+        usageClose?.cancel()
+        usageOpen = false
+        usage?.showingSettings = false
+    }
+
+    /// The panel is click-to-open, so it also gives up a few seconds after the pointer leaves.
+    private func scheduleUsageClose() {
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.hovering else { return }
+                self.closeUsage()
+            }
+        }
+        usageClose = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: work)
     }
 
     func open(_ session: Session?) {
@@ -149,7 +198,8 @@ final class NotchModel: ObservableObject {
     }
 
     /// Put the notch in an exact state (snapshots).
-    func stage(_ kind: SessionEvent.Kind?, session: Session?, hovering: Bool) {
+    func stage(_ kind: SessionEvent.Kind?, session: Session?, hovering: Bool, usageOpen: Bool = false) {
+        self.usageOpen = usageOpen
         banner = kind.flatMap { kind in session.map { Banner(kind: kind, session: $0) } }
         self.hovering = hovering
     }

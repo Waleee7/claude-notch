@@ -58,6 +58,14 @@ struct NotchView: View {
 
             content(mode)
 
+            if model.stripVisible, mode != .usage, let usage = model.usage {
+                UsageStripView(usage: usage, open: open)
+                    .frame(width: size.width, height: NotchModel.stripHeight)
+                    .offset(y: size.height - NotchModel.stripHeight)
+                    .onTapGesture { model.toggleUsage() }
+                    .transition(.opacity)
+            }
+
             MascotView(engine: engine, pixel: pixel)
                 .frame(width: box, height: box, alignment: .bottom)
                 .position(x: ground.x, y: ground.y + pixel - box / 2)
@@ -66,9 +74,13 @@ struct NotchView: View {
         .frame(width: size.width, height: size.height, alignment: .topLeading)
         .clipShape(shape)
         .contentShape(shape)
-        .onTapGesture { model.open(nil) }
+        .onTapGesture { mode == .usage ? model.closeUsage() : model.open(nil) }
         .contextMenu {
             Button(model.muted ? "Unmute Pop-downs" : "Mute Pop-downs") { model.muted.toggle() }
+            if let usage = model.usage {
+                if model.stripVisible { Button("Usage Details") { model.openUsage() } }
+                Button(usage.settings.showBar ? "Hide Usage Bar" : "Show Usage Bar") { usage.settings.showBar.toggle() }
+            }
             Divider()
             Button("Quit Claude Notch (until next login)") { AppDelegate.quit() }
         }
@@ -77,6 +89,7 @@ struct NotchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .animation(model.reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.42, dampingFraction: 0.74), value: mode)
         .animation(.spring(response: 0.38, dampingFraction: 0.85), value: model.sessions.count)
+        .animation(.spring(response: 0.38, dampingFraction: 0.85), value: model.stripVisible)
     }
 
     @ViewBuilder
@@ -91,6 +104,11 @@ struct NotchView: View {
         case .overview:
             OverviewContent(sessions: model.sessions, metrics: model.metrics) { model.open($0) }
                 .transition(.blurFade)
+        case .usage:
+            if let usage = model.usage {
+                UsagePanelView(usage: usage, metrics: model.metrics)
+                    .transition(.blurFade)
+            }
         case .collapsed:
             EmptyView()
         }
