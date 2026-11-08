@@ -53,3 +53,4 @@ build/ClaudeNotch.app/Contents/MacOS/ClaudeNotch --snapshot out   # render every
 ## License
 
 MIT © 2026 Joshua Dare. An unofficial community project, not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic, PBC.
+Rashaun Booker (@RaeBooker) — project contributor; documentation and setup guidance.
