@@ -1,4 +1,4 @@
-# Claude Notch
+# Claude Notch 
 
 A Dynamic Island for Claude Code on notched MacBooks. A pixel Claude lives beside the camera, shows what each session is doing, and drops down when a task finishes or needs you.
 
