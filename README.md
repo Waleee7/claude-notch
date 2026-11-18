@@ -1,4 +1,4 @@
-# Claude Notch 
+# Claude Notch
 
 A Dynamic Island for Claude Code on notched MacBooks. A pixel Claude lives beside the camera, shows what each session is doing, and drops down when a task finishes or needs you.
 
@@ -50,7 +50,23 @@ build/ClaudeNotch.app/Contents/MacOS/ClaudeNotch --snapshot out   # render every
 
 `scripts/build.sh` uses `swiftc` because `swift build` fails on Command Line Tools installs whose PackageDescription is out of sync with the compiler.
 
+Last run on 2026-11-17: `./scripts/test.sh` passed **119 of 119 checks**, and `./scripts/build.sh` built and signed the app with Swift 6.3.
+
+## Status
+
+Working macOS app. It runs at login on its author's MacBook through the login agent that `install.sh` sets up. There is no pre-built download yet: you build it from source with the two commands at the top.
+
+## Roadmap
+
+- A notarized, pre-built release, so installing doesn't need `swiftc`.
+- Tab jumping for more terminals than Terminal and iTerm2.
+
+## Credits
+
+Built by [Akinwale Dare](https://github.com/Waleee7).
+
+Rashaun Booker (@RaeBooker) — project contributor; documentation and setup guidance.
+
 ## License
 
-MIT © 2026 Joshua Dare. An unofficial community project, not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic, PBC.
-Rashaun Booker (@RaeBooker) — project contributor; documentation and setup guidance.
+MIT © 2026 Akinwale Dare. An unofficial community project, not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic, PBC.
